@@ -1,0 +1,67 @@
+name: 'Azure Entra Enterprise App Creator'
+description: 'Create Azure Entra ID Gallery Enterprise Applications with YAML configuration'
+author: 'Azure Automation Team'
+
+inputs:
+  config-file:
+    description: 'Path to the YAML configuration file'
+    required: true
+  validate-only:
+    description: 'Only validate configuration without creating the app'
+    required: false
+    default: 'false'
+  whatif:
+    description: 'Show what would be created without making changes'
+    required: false
+    default: 'false'
+  verbose:
+    description: 'Enable verbose logging'
+    required: false
+    default: 'false'
+
+outputs:
+  application-id:
+    description: 'Created application ID'
+    value: ${{ steps.create-app.outputs.application-id }}
+  service-principal-id:
+    description: 'Created service principal ID'
+    value: ${{ steps.create-app.outputs.service-principal-id }}
+  display-name:
+    description: 'Application display name'
+    value: ${{ steps.create-app.outputs.display-name }}
+  status:
+    description: 'Creation status'
+    value: ${{ steps.create-app.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: |
+        # Install yq for YAML processing (jq is pre-installed)
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+        
+        # Verify installations
+        yq --version
+        jq --version
+        az --version
+    
+    - name: Create Enterprise Application
+      id: create-app
+      shell: bash
+      run: |
+        # Make script executable
+        chmod +x ${{ github.action_path }}/scripts/create-enterprise-app.sh
+        
+        # Execute the script
+        ${{ github.action_path }}/scripts/create-enterprise-app.sh \
+          "${{ inputs.config-file }}" \
+          "${{ inputs.validate-only }}" \
+          "${{ inputs.whatif }}" \
+          "${{ inputs.verbose }}"
+
+branding:
+  icon: 'cloud'
+  color: 'blue'
