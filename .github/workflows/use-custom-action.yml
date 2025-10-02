@@ -1,0 +1,174 @@
+name: Use Custom Action - Enterprise App Creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: 'Path to YAML configuration file'
+        required: true
+        default: 'examples/salesforce.yaml'
+        type: choice
+        options:
+          - 'examples/salesforce.yaml'
+          - 'examples/servicenow.yaml' 
+          - 'examples/okta.yaml'
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - 'development'
+          - 'staging'
+          - 'production'
+      dry_run:
+        description: 'Perform dry run (no actual resources created)'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC authentication
+
+jobs:
+  create-enterprise-app:
+    name: Create Enterprise Application
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate configuration file exists
+        run: |
+          if [ ! -f "${{ github.event.inputs.config_file }}" ]; then
+            echo "❌ Configuration file not found: ${{ github.event.inputs.config_file }}"
+            exit 1
+          fi
+          
+          echo "✅ Configuration file found: ${{ github.event.inputs.config_file }}"
+          echo "📄 Configuration preview:"
+          head -20 "${{ github.event.inputs.config_file }}"
+
+      - name: Create Azure Entra Enterprise Application
+        id: create-app
+        uses: ./custom-action
+        with:
+          config-file: ${{ github.event.inputs.config_file }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          dry-run: ${{ github.event.inputs.dry_run }}
+          environment: ${{ github.event.inputs.environment }}
+          validation-mode: 'true'
+
+      - name: Display Results
+        run: |
+          echo "## 🎉 Enterprise Application Creation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ steps.create-app.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Time**: ${{ steps.create-app.outputs.execution-time }}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Configuration**: ${{ github.event.inputs.config_file }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.create-app.outputs.status }}" = "success" ] || [ "${{ steps.create-app.outputs.status }}" = "dry-run" ]; then
+            echo "### 🔗 Application Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Application ID**: \`${{ steps.create-app.outputs.application-id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Service Principal ID**: \`${{ steps.create-app.outputs.service-principal-id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Portal URL**: [View in Azure Portal](${{ steps.create-app.outputs.app-url }})" >> $GITHUB_STEP_SUMMARY
+            echo "- **SSO URL**: [Single Sign-On URL](${{ steps.create-app.outputs.sso-url }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            echo "### 📊 Created Resources" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            echo '${{ steps.create-app.outputs.created-resources }}' | jq '.' >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Store execution results
+        if: always()
+        run: |
+          # Create results file for audit trail
+          cat > execution-results.json << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "workflow_run_id": "${{ github.run_id }}",
+            "workflow_run_number": "${{ github.run_number }}",
+            "environment": "${{ github.event.inputs.environment }}",
+            "config_file": "${{ github.event.inputs.config_file }}",
+            "dry_run": ${{ github.event.inputs.dry_run }},
+            "status": "${{ steps.create-app.outputs.status }}",
+            "execution_time": "${{ steps.create-app.outputs.execution-time }}",
+            "application_id": "${{ steps.create-app.outputs.application-id }}",
+            "service_principal_id": "${{ steps.create-app.outputs.service-principal-id }}",
+            "app_url": "${{ steps.create-app.outputs.app-url }}",
+            "sso_url": "${{ steps.create-app.outputs.sso-url }}",
+            "created_resources": ${{ steps.create-app.outputs.created-resources }}
+          }
+          EOF
+          
+          echo "📝 Execution results stored in execution-results.json"
+
+      - name: Upload execution results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-results-${{ github.run_number }}
+          path: |
+            execution-results.json
+            ${{ github.event.inputs.config_file }}
+          retention-days: 30
+
+  notify-teams:
+    name: Notify Microsoft Teams
+    runs-on: ubuntu-latest
+    needs: create-enterprise-app
+    if: always() && github.event.inputs.environment == 'production'
+    
+    steps:
+      - name: Send Teams notification
+        uses: skitionek/notify-microsoft-teams@master
+        with:
+          webhook_url: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          overwrite: |
+            {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "${{ needs.create-enterprise-app.result == 'success' && '00FF00' || 'FF0000' }}",
+              "summary": "Enterprise App Creation - ${{ needs.create-enterprise-app.result }}",
+              "sections": [{
+                "activityTitle": "🏢 Azure Entra Enterprise Application",
+                "activitySubtitle": "Creation ${{ needs.create-enterprise-app.result }}",
+                "facts": [
+                  {
+                    "name": "Environment",
+                    "value": "${{ github.event.inputs.environment }}"
+                  },
+                  {
+                    "name": "Configuration",
+                    "value": "${{ github.event.inputs.config_file }}"
+                  },
+                  {
+                    "name": "Status",
+                    "value": "${{ needs.create-enterprise-app.result }}"
+                  },
+                  {
+                    "name": "Workflow",
+                    "value": "${{ github.repository }}/${{ github.workflow }}"
+                  }
+                ]
+              }],
+              "potentialAction": [{
+                "@type": "OpenUri",
+                "name": "View Workflow Run",
+                "targets": [{
+                  "os": "default",
+                  "uri": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }]
+              }]
+            }

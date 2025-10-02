@@ -1,0 +1,55 @@
+name: 'Azure Entra Enterprise App Creator'
+description: 'Create and configure Azure Entra ID enterprise applications from gallery templates'
+author: 'DevOps Team'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  config-file:
+    description: 'Path to the YAML configuration file for the enterprise application'
+    required: true
+  azure-tenant-id:
+    description: 'Azure AD Tenant ID'
+    required: true
+  azure-client-id:
+    description: 'Azure AD Client ID for authentication'
+    required: true
+  azure-client-secret:
+    description: 'Azure AD Client Secret for authentication'
+    required: true
+  dry-run:
+    description: 'Perform a dry run without creating actual resources'
+    required: false
+    default: 'false'
+  environment:
+    description: 'Target environment (dev, staging, production)'
+    required: false
+    default: 'dev'
+  validation-mode:
+    description: 'Enable additional validation checks'
+    required: false
+    default: 'true'
+
+outputs:
+  application-id:
+    description: 'The Object ID of the created enterprise application'
+  service-principal-id:
+    description: 'The Object ID of the created service principal'
+  app-url:
+    description: 'The URL to access the application in Azure portal'
+  sso-url:
+    description: 'The Single Sign-On URL for the application'
+  status:
+    description: 'Status of the operation (success, failed, skipped)'
+  execution-time:
+    description: 'Total execution time in seconds'
+  created-resources:
+    description: 'JSON array of all created resource IDs'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+  pre: 'pre.js'
+  post: 'post.js'
