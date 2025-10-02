@@ -1,0 +1,234 @@
+name: Deploy with Terraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: 'Path to the enterprise app configuration file'
+        required: true
+        type: string
+        default: 'examples/salesforce.yaml'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: 'development'
+      terraform_action:
+        description: 'Terraform action to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: 'plan'
+      auto_approve:
+        description: 'Auto-approve Terraform apply (use with caution)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  TF_VERSION: '1.6.0'
+  ARM_USE_OIDC: true
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  terraform:
+    name: 'Terraform ${{ inputs.terraform_action }}'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    outputs:
+      application-id: ${{ steps.terraform-output.outputs.application-id }}
+      service-principal-id: ${{ steps.terraform-output.outputs.service-principal-id }}
+      display-name: ${{ steps.terraform-output.outputs.display-name }}
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        terraform_wrapper: false
+        
+    - name: Azure Login (OIDC)
+      uses: azure/login@v2
+      with:
+        client-id: ${{ vars.AZURE_CLIENT_ID }}
+        tenant-id: ${{ vars.AZURE_TENANT_ID }}
+        subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        
+    - name: Validate Configuration File
+      run: |
+        if [[ ! -f "${{ inputs.config_file }}" ]]; then
+          echo "❌ Configuration file not found: ${{ inputs.config_file }}"
+          exit 1
+        fi
+        
+        # Install yq for YAML validation
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+        
+        # Validate YAML syntax
+        if ! yq eval '.' "${{ inputs.config_file }}" > /dev/null 2>&1; then
+          echo "❌ Invalid YAML syntax in configuration file"
+          exit 1
+        fi
+        
+        echo "✅ Configuration file validation passed"
+        
+    - name: Terraform Init
+      working-directory: ./terraform
+      run: |
+        terraform init \
+          -backend-config="resource_group_name=rg-terraform-state-${{ inputs.environment }}" \
+          -backend-config="storage_account_name=sttfstate${{ inputs.environment }}$(echo ${{ vars.AZURE_SUBSCRIPTION_ID }} | tr -d '-' | cut -c1-8)" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=enterprise-apps/${{ inputs.environment }}/terraform.tfstate"
+          
+    - name: Terraform Format Check
+      working-directory: ./terraform
+      run: terraform fmt -check -recursive
+      
+    - name: Terraform Validate
+      working-directory: ./terraform
+      run: terraform validate
+      
+    - name: Terraform Plan
+      working-directory: ./terraform
+      run: |
+        terraform plan \
+          -var="config_file_path=../${{ inputs.config_file }}" \
+          -var="environment=${{ inputs.environment }}" \
+          -var="created_by=${{ github.actor }}" \
+          -out=tfplan
+          
+    - name: Save Terraform Plan
+      if: inputs.terraform_action == 'plan'
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plan-${{ inputs.environment }}
+        path: terraform/tfplan
+        retention-days: 30
+        
+    - name: Terraform Apply
+      if: inputs.terraform_action == 'apply'
+      working-directory: ./terraform
+      run: |
+        if [[ "${{ inputs.auto_approve }}" == "true" ]]; then
+          terraform apply -auto-approve tfplan
+        else
+          echo "⚠️ Manual approval required. Use auto_approve=true for automated deployment."
+          terraform apply tfplan
+        fi
+        
+    - name: Terraform Destroy
+      if: inputs.terraform_action == 'destroy'
+      working-directory: ./terraform
+      run: |
+        if [[ "${{ inputs.auto_approve }}" == "true" ]]; then
+          terraform destroy -auto-approve \
+            -var="config_file_path=../${{ inputs.config_file }}" \
+            -var="environment=${{ inputs.environment }}" \
+            -var="created_by=${{ github.actor }}"
+        else
+          echo "⚠️ Manual approval required for destroy operation."
+          terraform destroy \
+            -var="config_file_path=../${{ inputs.config_file }}" \
+            -var="environment=${{ inputs.environment }}" \
+            -var="created_by=${{ github.actor }}"
+        fi
+        
+    - name: Extract Terraform Outputs
+      if: inputs.terraform_action == 'apply'
+      id: terraform-output
+      working-directory: ./terraform
+      run: |
+        # Extract outputs from Terraform
+        APPLICATION_ID=$(terraform output -raw application_id 2>/dev/null || echo "")
+        SERVICE_PRINCIPAL_ID=$(terraform output -raw service_principal_id 2>/dev/null || echo "")
+        DISPLAY_NAME=$(terraform output -raw display_name 2>/dev/null || echo "")
+        
+        # Set GitHub outputs
+        echo "application-id=$APPLICATION_ID" >> $GITHUB_OUTPUT
+        echo "service-principal-id=$SERVICE_PRINCIPAL_ID" >> $GITHUB_OUTPUT
+        echo "display-name=$DISPLAY_NAME" >> $GITHUB_OUTPUT
+        
+        # Also read from JSON output file if available
+        if [[ -f "terraform-output.json" ]]; then
+          cat terraform-output.json
+        fi
+        
+    - name: Update Pull Request Comment
+      if: github.event_name == 'pull_request' && inputs.terraform_action == 'plan'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const plan = fs.readFileSync('terraform/tfplan.txt', 'utf8');
+          
+          const comment = `## 🏗️ Terraform Plan Results
+          
+          **Environment:** \`${{ inputs.environment }}\`
+          **Configuration:** \`${{ inputs.config_file }}\`
+          **Action:** \`${{ inputs.terraform_action }}\`
+          
+          <details>
+          <summary>📋 Terraform Plan Output</summary>
+          
+          \`\`\`hcl
+          ${plan}
+          \`\`\`
+          
+          </details>
+          
+          **Next Steps:**
+          - Review the plan carefully
+          - If approved, run the workflow with \`terraform_action: apply\`
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+          
+    - name: Display Results Summary
+      if: always()
+      run: |
+        echo "## 🏗️ Terraform Deployment Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Configuration File:** \`${{ inputs.config_file }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** \`${{ inputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Action:** \`${{ inputs.terraform_action }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Terraform Version:** \`${{ env.TF_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ inputs.terraform_action }}" == "apply" ]]; then
+          echo "### ✅ Created Resources" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application ID:** \`${{ steps.terraform-output.outputs.application-id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service Principal ID:** \`${{ steps.terraform-output.outputs.service-principal-id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Display Name:** \`${{ steps.terraform-output.outputs.display-name }}\`" >> $GITHUB_STEP_SUMMARY
+        elif [[ "${{ inputs.terraform_action }}" == "plan" ]]; then
+          echo "### 📋 Plan Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Review the plan output above" >> $GITHUB_STEP_SUMMARY
+          echo "- Run with \`terraform_action: apply\` to create resources" >> $GITHUB_STEP_SUMMARY
+        elif [[ "${{ inputs.terraform_action }}" == "destroy" ]]; then
+          echo "### 🗑️ Resources Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "- All managed resources have been removed" >> $GITHUB_STEP_SUMMARY
+        fi
