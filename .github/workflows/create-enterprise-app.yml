@@ -171,35 +171,16 @@ jobs:
         with:
           fetch-depth: 1
       
-      - name: Setup PowerShell
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.x'
-      
-      - name: Install PowerShell
+      - name: Install required tools
         run: |
-          # Install PowerShell 7+
-          wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
-          sudo dpkg -i packages-microsoft-prod.deb
-          sudo apt-get update
-          sudo apt-get install -y powershell
+          # Install yq for YAML processing
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
           
-          # Verify installation
-          pwsh --version
-      
-      - name: Install required PowerShell modules
-        run: |
-          pwsh -Command "
-            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-            Install-Module -Name Az.Accounts -Force -Scope CurrentUser
-            Install-Module -Name Microsoft.Graph.Authentication -Force -Scope CurrentUser
-            Install-Module -Name Microsoft.Graph.Applications -Force -Scope CurrentUser
-            Install-Module -Name Microsoft.Graph.Identity.DirectoryManagement -Force -Scope CurrentUser
-            Install-Module -Name powershell-yaml -Force -Scope CurrentUser
-            
-            # Verify modules
-            Get-Module -ListAvailable Az.Accounts, Microsoft.Graph.Authentication, Microsoft.Graph.Applications, Microsoft.Graph.Identity.DirectoryManagement, powershell-yaml
-          "
+          # Verify installations (jq and Azure CLI are pre-installed on GitHub runners)
+          yq --version
+          jq --version
+          az --version
       
       - name: Authenticate to Azure
         uses: azure/login@v2
@@ -217,35 +198,27 @@ jobs:
       - name: Create Enterprise Application
         id: create-app
         run: |
-          $whatIfFlag = if ('${{ inputs.whatif }}' -eq 'true') { '-WhatIf' } else { '' }
-          $validateFlag = if ('${{ inputs.validate_only }}' -eq 'true') { '-Validate' } else { '' }
-          $verboseFlag = '-Verbose'
+          # Make script executable
+          chmod +x ./scripts/create-enterprise-app.sh
           
-          $command = "./scripts/Create-EnterpriseApp.ps1 -ConfigPath '${{ inputs.config_file }}' $whatIfFlag $validateFlag $verboseFlag"
+          # Set parameters
+          VALIDATE_FLAG=""
+          WHATIF_FLAG=""
           
-          Write-Host "Executing: $command"
+          if [[ "${{ inputs.validate_only }}" == "true" ]]; then
+            VALIDATE_FLAG="true"
+          else
+            VALIDATE_FLAG="false"
+          fi
           
-          try {
-            Invoke-Expression $command
-            
-            if ('${{ inputs.validate_only }}' -eq 'true') {
-              Write-Host "✅ Validation completed successfully"
-              echo "status=Validated" >> $env:GITHUB_OUTPUT
-            } elseif ('${{ inputs.whatif }}' -eq 'true') {
-              Write-Host "✅ WhatIf completed successfully"
-              echo "status=WhatIf" >> $env:GITHUB_OUTPUT
-            } else {
-              Write-Host "✅ Enterprise application created successfully"
-              echo "status=Success" >> $env:GITHUB_OUTPUT
-            }
-          }
-          catch {
-            Write-Host "❌ Error: $($_.Exception.Message)"
-            echo "status=Failed" >> $env:GITHUB_OUTPUT
-            echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
-            exit 1
-          }
-        shell: pwsh
+          if [[ "${{ inputs.whatif }}" == "true" ]]; then
+            WHATIF_FLAG="true"
+          else
+            WHATIF_FLAG="false"
+          fi
+          
+          # Execute the bash script
+          ./scripts/create-enterprise-app.sh "${{ inputs.config_file }}" "$VALIDATE_FLAG" "$WHATIF_FLAG" "true"
       
       - name: Display results
         if: always()
