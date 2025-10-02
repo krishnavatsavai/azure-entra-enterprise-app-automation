@@ -1,0 +1,10 @@
+# Development environment configuration
+environment = "development"
+created_by  = "terraform-dev"
+
+# Key Vault configuration (only needed if provisioning is enabled)
+key_vault_location    = "East US"
+resource_group_name   = "rg-enterprise-apps-dev"
+
+# Enable state backup
+enable_state_backup = true
