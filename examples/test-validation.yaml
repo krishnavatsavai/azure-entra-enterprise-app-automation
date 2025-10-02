@@ -1,0 +1,55 @@
+# Test configuration for validation testing
+# This configuration intentionally contains various scenarios for testing
+
+metadata:
+  name: "test-app-validation"
+  description: "Test configuration for validation scenarios"
+  version: "1.0.0"
+  tags:
+    - "test"
+    - "validation"
+
+application:
+  galleryAppId: "12345678-1234-1234-1234-123456789012"
+  displayName: "Test Application for Validation"
+  homepage: "https://test.example.com"
+  logoUrl: "https://test.example.com/logo.png"
+  notes: "This is a test configuration file for validation purposes"
+
+assignment:
+  assignmentRequired: false
+  visibleToUsers: true
+  
+  users:
+    - userPrincipalName: "test.user@contoso.com"
+      role: "User"
+    - userPrincipalName: "test.admin@contoso.com"
+      role: "Admin"
+  
+  groups:
+    - displayName: "Test Users Group"
+      role: "User"
+
+sso:
+  ssoMode: "saml"
+  
+  saml:
+    identifier: "https://test.example.com/saml"
+    replyUrl: "https://test.example.com/saml/acs"
+    signOnUrl: "https://test.example.com/saml/login"
+    nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+    
+    attributes:
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+        source: "user.mail"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+        source: "user.userprincipalname"
+
+provisioning:
+  enabled: false
+  mode: "manual"
+
+notifications:
+  emailAddresses:
+    - "test.admin@contoso.com"
+  webhookUrl: "https://test.example.com/webhook"

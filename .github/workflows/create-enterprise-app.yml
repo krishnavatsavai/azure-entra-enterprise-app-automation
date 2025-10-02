@@ -1,0 +1,315 @@
+name: Create Azure Entra Enterprise Application
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: 'Path to the enterprise app configuration file'
+        required: true
+        type: string
+        default: 'templates/enterprise-app-template.yaml'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: 'development'
+      validate_only:
+        description: 'Only validate configuration without creating the app'
+        required: false
+        type: boolean
+        default: false
+      whatif:
+        description: 'Show what would be created without making changes'
+        required: false
+        type: boolean
+        default: false
+  
+  workflow_call:
+    inputs:
+      config_file:
+        description: 'Path to the enterprise app configuration file'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment'
+        required: true
+        type: string
+      validate_only:
+        description: 'Only validate configuration without creating the app'
+        required: false
+        type: boolean
+        default: false
+      whatif:
+        description: 'Show what would be created without making changes'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      application-id:
+        description: 'Created application ID'
+        value: ${{ jobs.create-enterprise-app.outputs.application-id }}
+      service-principal-id:
+        description: 'Created service principal ID'
+        value: ${{ jobs.create-enterprise-app.outputs.service-principal-id }}
+      display-name:
+        description: 'Application display name'
+        value: ${{ jobs.create-enterprise-app.outputs.display-name }}
+      status:
+        description: 'Creation status'
+        value: ${{ jobs.create-enterprise-app.outputs.status }}
+
+env:
+  # PowerShell configuration
+  POWERSHELL_TELEMETRY_OPTOUT: 1
+  # Azure configuration
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+permissions:
+  id-token: write   # For OIDC authentication
+  contents: read    # For reading repository contents
+  issues: write     # For creating issues on failure (optional)
+
+jobs:
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      config-exists: ${{ steps.check-config.outputs.exists }}
+      config-valid: ${{ steps.validate-config.outputs.valid }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: Check configuration file exists
+        id: check-config
+        run: |
+          if [[ -f "${{ inputs.config_file }}" ]]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Configuration file found: ${{ inputs.config_file }}"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "❌ Configuration file not found: ${{ inputs.config_file }}"
+            exit 1
+          fi
+      
+      - name: Install yq for YAML validation
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      
+      - name: Validate YAML syntax
+        id: validate-config
+        run: |
+          if yq eval '.' "${{ inputs.config_file }}" > /dev/null 2>&1; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ YAML syntax is valid"
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "❌ YAML syntax is invalid"
+            exit 1
+          fi
+      
+      - name: Validate required fields
+        run: |
+          config_file="${{ inputs.config_file }}"
+          
+          # Check required metadata fields
+          if ! yq eval '.metadata.name' "$config_file" | grep -qv "null"; then
+            echo "❌ Missing required field: metadata.name"
+            exit 1
+          fi
+          
+          if ! yq eval '.metadata.version' "$config_file" | grep -qv "null"; then
+            echo "❌ Missing required field: metadata.version"
+            exit 1
+          fi
+          
+          # Check required application fields
+          if ! yq eval '.application.galleryAppId' "$config_file" | grep -qv "null"; then
+            echo "❌ Missing required field: application.galleryAppId"
+            exit 1
+          fi
+          
+          if ! yq eval '.application.displayName' "$config_file" | grep -qv "null"; then
+            echo "❌ Missing required field: application.displayName"
+            exit 1
+          fi
+          
+          # Validate GUID format
+          gallery_app_id=$(yq eval '.application.galleryAppId' "$config_file")
+          if ! [[ $gallery_app_id =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "❌ Invalid GUID format for application.galleryAppId: $gallery_app_id"
+            exit 1
+          fi
+          
+          echo "✅ All required fields are present and valid"
+
+  create-enterprise-app:
+    name: Create Enterprise Application
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    if: needs.validate-inputs.outputs.config-exists == 'true' && needs.validate-inputs.outputs.config-valid == 'true'
+    environment: ${{ inputs.environment }}
+    
+    outputs:
+      application-id: ${{ steps.create-app.outputs.application-id }}
+      service-principal-id: ${{ steps.create-app.outputs.service-principal-id }}
+      display-name: ${{ steps.create-app.outputs.display-name }}
+      status: ${{ steps.create-app.outputs.status }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: Setup PowerShell
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+      
+      - name: Install PowerShell
+        run: |
+          # Install PowerShell 7+
+          wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
+          
+          # Verify installation
+          pwsh --version
+      
+      - name: Install required PowerShell modules
+        run: |
+          pwsh -Command "
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+            Install-Module -Name Az.Accounts -Force -Scope CurrentUser
+            Install-Module -Name Microsoft.Graph.Authentication -Force -Scope CurrentUser
+            Install-Module -Name Microsoft.Graph.Applications -Force -Scope CurrentUser
+            Install-Module -Name Microsoft.Graph.Identity.DirectoryManagement -Force -Scope CurrentUser
+            Install-Module -Name powershell-yaml -Force -Scope CurrentUser
+            
+            # Verify modules
+            Get-Module -ListAvailable Az.Accounts, Microsoft.Graph.Authentication, Microsoft.Graph.Applications, Microsoft.Graph.Identity.DirectoryManagement, powershell-yaml
+          "
+      
+      - name: Authenticate to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Set environment variables for authentication
+        run: |
+          echo "AZURE_CLIENT_ID=${{ vars.AZURE_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "AZURE_TENANT_ID=${{ vars.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+          echo "AZURE_SUBSCRIPTION_ID=${{ vars.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_ENV
+      
+      - name: Create Enterprise Application
+        id: create-app
+        run: |
+          $whatIfFlag = if ('${{ inputs.whatif }}' -eq 'true') { '-WhatIf' } else { '' }
+          $validateFlag = if ('${{ inputs.validate_only }}' -eq 'true') { '-Validate' } else { '' }
+          $verboseFlag = '-Verbose'
+          
+          $command = "./scripts/Create-EnterpriseApp.ps1 -ConfigPath '${{ inputs.config_file }}' $whatIfFlag $validateFlag $verboseFlag"
+          
+          Write-Host "Executing: $command"
+          
+          try {
+            Invoke-Expression $command
+            
+            if ('${{ inputs.validate_only }}' -eq 'true') {
+              Write-Host "✅ Validation completed successfully"
+              echo "status=Validated" >> $env:GITHUB_OUTPUT
+            } elseif ('${{ inputs.whatif }}' -eq 'true') {
+              Write-Host "✅ WhatIf completed successfully"
+              echo "status=WhatIf" >> $env:GITHUB_OUTPUT
+            } else {
+              Write-Host "✅ Enterprise application created successfully"
+              echo "status=Success" >> $env:GITHUB_OUTPUT
+            }
+          }
+          catch {
+            Write-Host "❌ Error: $($_.Exception.Message)"
+            echo "status=Failed" >> $env:GITHUB_OUTPUT
+            echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+        shell: pwsh
+      
+      - name: Display results
+        if: always()
+        run: |
+          echo "## 🚀 Enterprise Application Creation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration File:** \`${{ inputs.config_file }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** \`${{ inputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** \`${{ steps.create-app.outputs.status }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.create-app.outputs.status }}" == "Success" ]]; then
+            echo "### ✅ Success Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Application ID:** \`${{ steps.create-app.outputs.application-id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Service Principal ID:** \`${{ steps.create-app.outputs.service-principal-id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Display Name:** \`${{ steps.create-app.outputs.display-name }}\`" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ steps.create-app.outputs.status }}" == "Failed" ]]; then
+            echo "### ❌ Failure Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Error:** \`${{ steps.create-app.outputs.error }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Create issue on failure
+        if: failure() && inputs.environment == 'production'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Enterprise App Creation Failed - ${{ inputs.config_file }}`,
+              body: `
+            ## Enterprise Application Creation Failed
+            
+            **Workflow:** ${{ github.workflow }}
+            **Run ID:** ${{ github.run_id }}
+            **Environment:** ${{ inputs.environment }}
+            **Configuration:** \`${{ inputs.config_file }}\`
+            **Error:** \`${{ steps.create-app.outputs.error }}\`
+            
+            **Triggered by:** @${{ github.actor }}
+            **Commit:** ${{ github.sha }}
+            
+            ## Next Steps
+            1. Review the workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            2. Check the configuration file for issues
+            3. Verify Azure permissions and connectivity
+            4. Re-run the workflow after fixing the issues
+            
+            /cc @${{ github.actor }}
+            `,
+              labels: ['bug', 'azure', 'enterprise-app', 'automated']
+            });
+            
+            console.log(`Created issue #${issue.data.number}`);
+
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, create-enterprise-app]
+    if: always()
+    
+    steps:
+      - name: Azure logout
+        if: always()
+        run: |
+          az logout --username ${{ vars.AZURE_CLIENT_ID }} || true
+          echo "✅ Azure logout completed"

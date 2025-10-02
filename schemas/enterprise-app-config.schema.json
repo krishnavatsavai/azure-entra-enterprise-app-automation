@@ -1,0 +1,260 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Azure Entra Enterprise App Configuration",
+  "description": "Configuration schema for Azure Entra Gallery Enterprise Application",
+  "type": "object",
+  "required": ["metadata", "application"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "description": "Metadata about this configuration",
+      "required": ["name", "description", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Configuration name"
+        },
+        "description": {
+          "type": "string",
+          "description": "Configuration description"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Configuration version (semantic versioning)"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional tags for organization"
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "description": "Enterprise application configuration",
+      "required": ["galleryAppId", "displayName"],
+      "properties": {
+        "galleryAppId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "description": "Gallery application template ID (GUID)"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Display name for the enterprise application"
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri",
+          "description": "Homepage URL for the application"
+        },
+        "logoUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Logo URL for the application"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Optional notes about the application"
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "description": "User and group assignment configuration",
+      "properties": {
+        "assignmentRequired": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether user assignment is required to access this application"
+        },
+        "visibleToUsers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the application is visible to users in My Apps portal"
+        },
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["userPrincipalName"],
+            "properties": {
+              "userPrincipalName": {
+                "type": "string",
+                "format": "email",
+                "description": "User principal name (email)"
+              },
+              "role": {
+                "type": "string",
+                "description": "Optional role assignment"
+              }
+            }
+          },
+          "description": "Users to assign to the application"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["displayName"],
+            "properties": {
+              "displayName": {
+                "type": "string",
+                "description": "Group display name"
+              },
+              "objectId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                "description": "Optional group object ID (if known)"
+              },
+              "role": {
+                "type": "string",
+                "description": "Optional role assignment"
+              }
+            }
+          },
+          "description": "Groups to assign to the application"
+        }
+      }
+    },
+    "sso": {
+      "type": "object",
+      "description": "Single Sign-On configuration",
+      "properties": {
+        "ssoMode": {
+          "type": "string",
+          "enum": ["saml", "password", "linkedSignOn", "disabled"],
+          "default": "saml",
+          "description": "SSO mode for the application"
+        },
+        "saml": {
+          "type": "object",
+          "description": "SAML SSO configuration (when ssoMode is saml)",
+          "properties": {
+            "identifier": {
+              "type": "string",
+              "description": "SAML identifier (Entity ID)"
+            },
+            "replyUrl": {
+              "type": "string",
+              "format": "uri",
+              "description": "SAML reply URL (ACS URL)"
+            },
+            "signOnUrl": {
+              "type": "string",
+              "format": "uri",
+              "description": "SAML sign-on URL"
+            },
+            "logoutUrl": {
+              "type": "string",
+              "format": "uri",
+              "description": "SAML logout URL"
+            },
+            "nameIdFormat": {
+              "type": "string",
+              "enum": [
+                "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+                "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
+                "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
+                "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+              ],
+              "default": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+              "description": "SAML NameID format"
+            },
+            "attributes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "source"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Attribute name"
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "Attribute source (e.g., user.mail, user.userprincipalname)"
+                  },
+                  "namespace": {
+                    "type": "string",
+                    "description": "Optional attribute namespace"
+                  }
+                }
+              },
+              "description": "SAML attribute mappings"
+            }
+          }
+        }
+      }
+    },
+    "provisioning": {
+      "type": "object",
+      "description": "User provisioning configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether user provisioning is enabled"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["automatic", "manual"],
+          "default": "manual",
+          "description": "Provisioning mode"
+        },
+        "credentials": {
+          "type": "object",
+          "description": "Provisioning credentials (stored securely)",
+          "properties": {
+            "keyVaultName": {
+              "type": "string",
+              "description": "Key Vault name containing provisioning secrets"
+            },
+            "secretNames": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "type": "string",
+                  "description": "Secret name for provisioning username"
+                },
+                "password": {
+                  "type": "string",
+                  "description": "Secret name for provisioning password"
+                },
+                "token": {
+                  "type": "string",
+                  "description": "Secret name for provisioning token"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "description": "Notification configuration",
+      "properties": {
+        "emailAddresses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "Email addresses for notifications"
+        },
+        "webhookUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Webhook URL for notifications"
+        }
+      }
+    }
+  }
+}

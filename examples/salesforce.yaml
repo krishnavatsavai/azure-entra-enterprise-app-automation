@@ -1,0 +1,80 @@
+# Salesforce Enterprise App Configuration
+# Configuration for integrating Salesforce with Azure Entra ID
+# Gallery App ID: 6d370ae3-b4df-4e8e-8b59-4c58102e13da (Salesforce)
+
+metadata:
+  name: "salesforce-production"
+  description: "Salesforce Enterprise Application for Production Environment"
+  version: "1.2.0"
+  tags:
+    - "salesforce"
+    - "saml"
+    - "production"
+    - "crm"
+
+application:
+  # Salesforce Gallery Application Template ID
+  galleryAppId: "6d370ae3-b4df-4e8e-8b59-4c58102e13da"
+  displayName: "Salesforce - Production"
+  homepage: "https://contoso.my.salesforce.com"
+  logoUrl: "https://contoso.blob.core.windows.net/logos/salesforce-logo.png"
+  notes: "Salesforce CRM integration for production environment with SAML SSO"
+
+assignment:
+  assignmentRequired: true
+  visibleToUsers: true
+  
+  users:
+    - userPrincipalName: "sales.manager@contoso.com"
+      role: "Admin"
+    - userPrincipalName: "sales.rep1@contoso.com"
+      role: "User"
+    - userPrincipalName: "sales.rep2@contoso.com"
+      role: "User"
+  
+  groups:
+    - displayName: "Sales Team"
+      role: "User"
+    - displayName: "Sales Managers"
+      role: "Admin"
+    - displayName: "Executive Team"
+      role: "Admin"
+
+sso:
+  ssoMode: "saml"
+  
+  saml:
+    identifier: "https://contoso.my.salesforce.com"
+    replyUrl: "https://contoso.my.salesforce.com"
+    signOnUrl: "https://contoso.my.salesforce.com/idp/login?RelayState=orgId%3D00D2v000001kMCg"
+    logoutUrl: "https://contoso.my.salesforce.com/idp/logout"
+    nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+    
+    attributes:
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+        source: "user.mail"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname"
+        source: "user.givenname"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"
+        source: "user.surname"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+        source: "user.userprincipalname"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+        source: "user.userprincipalname"
+
+provisioning:
+  enabled: true
+  mode: "automatic"
+  
+  credentials:
+    keyVaultName: "contoso-prod-kv"
+    secretNames:
+      username: "salesforce-provisioning-username"
+      password: "salesforce-provisioning-password"
+
+notifications:
+  emailAddresses:
+    - "it-admin@contoso.com"
+    - "security-team@contoso.com"
+    - "sales-admin@contoso.com"
+  webhookUrl: "https://contoso.webhook.office.com/webhookb2/salesforce-notifications"

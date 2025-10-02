@@ -1,0 +1,110 @@
+# Azure Entra Enterprise App Configuration Template
+# This YAML file defines the configuration for creating an Azure Entra Gallery Enterprise Application
+# Schema validation: schemas/enterprise-app-config.schema.json
+
+metadata:
+  name: "sample-enterprise-app"
+  description: "Sample configuration for Azure Entra Gallery Enterprise Application"
+  version: "1.0.0"
+  tags:
+    - "sample"
+    - "saml"
+    - "enterprise"
+
+# Enterprise Application Configuration
+application:
+  # Gallery Application Template ID (find this in Azure portal under Enterprise Applications > New Application > Gallery)
+  # This is a sample GUID - replace with actual gallery app template ID
+  galleryAppId: "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"
+  
+  # Display name for the enterprise application
+  displayName: "Sample Enterprise Application"
+  
+  # Optional: Homepage URL
+  homepage: "https://example.com"
+  
+  # Optional: Logo URL
+  logoUrl: "https://example.com/logo.png"
+  
+  # Optional: Notes about the application
+  notes: "Sample enterprise application for demonstration purposes"
+
+# User and Group Assignment Configuration
+assignment:
+  # Whether user assignment is required to access this application
+  assignmentRequired: true
+  
+  # Whether the application is visible to users in My Apps portal
+  visibleToUsers: true
+  
+  # Users to assign to the application
+  users:
+    - userPrincipalName: "user1@contoso.com"
+      role: "User"
+    - userPrincipalName: "admin@contoso.com"
+      role: "Admin"
+  
+  # Groups to assign to the application
+  groups:
+    - displayName: "Enterprise App Users"
+      role: "User"
+    - displayName: "Enterprise App Admins"
+      role: "Admin"
+
+# Single Sign-On Configuration
+sso:
+  # SSO mode: saml, password, linkedSignOn, or disabled
+  ssoMode: "saml"
+  
+  # SAML configuration (only used when ssoMode is saml)
+  saml:
+    # SAML identifier (Entity ID)
+    identifier: "https://example.com/saml"
+    
+    # SAML reply URL (Assertion Consumer Service URL)
+    replyUrl: "https://example.com/saml/acs"
+    
+    # SAML sign-on URL
+    signOnUrl: "https://example.com/saml/login"
+    
+    # SAML logout URL (optional)
+    logoutUrl: "https://example.com/saml/logout"
+    
+    # NameID format
+    nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+    
+    # SAML attribute mappings
+    attributes:
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+        source: "user.mail"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname"
+        source: "user.givenname"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"
+        source: "user.surname"
+      - name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+        source: "user.userprincipalname"
+
+# User Provisioning Configuration
+provisioning:
+  # Whether user provisioning is enabled
+  enabled: false
+  
+  # Provisioning mode: automatic or manual
+  mode: "manual"
+  
+  # Provisioning credentials (stored securely in Key Vault)
+  credentials:
+    keyVaultName: "my-keyvault"
+    secretNames:
+      username: "provisioning-username"
+      password: "provisioning-password"
+
+# Notification Configuration
+notifications:
+  # Email addresses for notifications
+  emailAddresses:
+    - "admin@contoso.com"
+    - "security@contoso.com"
+  
+  # Optional: Webhook URL for notifications
+  webhookUrl: "https://example.com/webhook"

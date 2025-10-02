@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+*.log
+*.tmp
+
+# PowerShell
+*.ps1xml
+
+# Azure
+.azure/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and credentials
+*.secret
+*.key
+*.pem
+config.local.yaml
+secrets.yaml
+
+# Test outputs
+test-results/
+coverage/
+
+# Temporary files
+temp/
+tmp/
+*.bak
+*.backup
