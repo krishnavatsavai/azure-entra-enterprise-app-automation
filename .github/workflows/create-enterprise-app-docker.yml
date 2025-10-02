@@ -1,0 +1,159 @@
+name: Create Azure Entra Enterprise Application (Docker)
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: 'Path to the enterprise app configuration file'
+        required: true
+        type: string
+        default: 'templates/enterprise-app-template.yaml'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+        default: 'development'
+      validate_only:
+        description: 'Only validate configuration without creating the app'
+        required: false
+        type: boolean
+        default: false
+      whatif:
+        description: 'Show what would be created without making changes'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/enterprise-app-creator
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
+jobs:
+  validate-and-create:
+    name: Docker-based Enterprise App Creation
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    outputs:
+      application-id: ${{ steps.create-app.outputs.application-id }}
+      service-principal-id: ${{ steps.create-app.outputs.service-principal-id }}
+      display-name: ${{ steps.create-app.outputs.display-name }}
+      status: ${{ steps.create-app.outputs.status }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Check if image exists, build if not
+        id: check-image
+        run: |
+          if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest > /dev/null 2>&1; then
+            echo "image-exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Using existing Docker image"
+          else
+            echo "image-exists=false" >> $GITHUB_OUTPUT
+            echo "🔨 Building Docker image"
+          fi
+          
+      - name: Build Docker image (if needed)
+        if: steps.check-image.outputs.image-exists == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Authenticate to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Create Enterprise Application (Docker)
+        id: create-app
+        run: |
+          # Set parameters for the container
+          VALIDATE_FLAG=""
+          WHATIF_FLAG=""
+          
+          if [[ "${{ inputs.validate_only }}" == "true" ]]; then
+            VALIDATE_FLAG="-Validate"
+          fi
+          
+          if [[ "${{ inputs.whatif }}" == "true" ]]; then
+            WHATIF_FLAG="-WhatIf"
+          fi
+          
+          # Create output directory
+          mkdir -p ./docker-output
+          
+          # Run the container with proper authentication
+          docker run --rm \
+            -e AZURE_CLIENT_ID="${{ vars.AZURE_CLIENT_ID }}" \
+            -e AZURE_TENANT_ID="${{ vars.AZURE_TENANT_ID }}" \
+            -e AZURE_SUBSCRIPTION_ID="${{ vars.AZURE_SUBSCRIPTION_ID }}" \
+            -v "$PWD/${{ inputs.config_file }}:/app/config.yaml:ro" \
+            -v "$PWD/docker-output:/app/output" \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            -ConfigPath /app/config.yaml \
+            $VALIDATE_FLAG \
+            $WHATIF_FLAG \
+            -Verbose
+            
+          # Read outputs from container
+          if [[ -f "./docker-output/result.json" ]]; then
+            APPLICATION_ID=$(jq -r '.applicationId // empty' ./docker-output/result.json)
+            SERVICE_PRINCIPAL_ID=$(jq -r '.servicePrincipalId // empty' ./docker-output/result.json)
+            DISPLAY_NAME=$(jq -r '.displayName // empty' ./docker-output/result.json)
+            STATUS=$(jq -r '.status // "Unknown"' ./docker-output/result.json)
+            
+            echo "application-id=$APPLICATION_ID" >> $GITHUB_OUTPUT
+            echo "service-principal-id=$SERVICE_PRINCIPAL_ID" >> $GITHUB_OUTPUT
+            echo "display-name=$DISPLAY_NAME" >> $GITHUB_OUTPUT
+            echo "status=$STATUS" >> $GITHUB_OUTPUT
+          else
+            echo "status=Completed" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Display results
+        if: always()
+        run: |
+          echo "## 🐳 Docker-based Enterprise Application Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration File:** \`${{ inputs.config_file }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** \`${{ inputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** \`${{ steps.create-app.outputs.status }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Execution Method:** Docker Container" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.create-app.outputs.status }}" == "Success" ]]; then
+            echo "### ✅ Success Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Application ID:** \`${{ steps.create-app.outputs.application-id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Service Principal ID:** \`${{ steps.create-app.outputs.service-principal-id }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Display Name:** \`${{ steps.create-app.outputs.display-name }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
