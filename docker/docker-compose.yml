@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  enterprise-app-creator:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: azure-enterprise-app-creator
+    environment:
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - AZURE_SUBSCRIPTION_ID=${AZURE_SUBSCRIPTION_ID}
+    volumes:
+      - ../examples:/app/examples:ro
+      - ../templates:/app/templates:ro
+      - ./output:/app/output
+    command: [
+      "-ConfigPath", "/app/examples/salesforce.yaml",
+      "-Verbose"
+    ]
+    
+  # Development service with interactive shell
+  enterprise-app-creator-dev:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: azure-enterprise-app-creator-dev
+    environment:
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - AZURE_SUBSCRIPTION_ID=${AZURE_SUBSCRIPTION_ID}
+    volumes:
+      - ../examples:/app/examples:ro
+      - ../templates:/app/templates:ro
+      - ./output:/app/output
+    entrypoint: ["/bin/bash"]
+    stdin_open: true
+    tty: true
